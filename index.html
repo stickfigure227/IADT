@@ -142,6 +142,20 @@
   .finding ul{ margin:6px 0 0 18px; padding:0 }
   .finding li{ margin:3px 0 }
   .no-data{color:var(--muted); font-style:italic}
+  
+  /* Provisional diagnosis */
+  .provisional{
+    background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px;
+  }
+  .provisional h2{margin:0 0 10px; font-size:16px}
+  .prov-infracture{color:var(--muted); font-size:13px; margin-bottom:8px}
+  .prov-list{list-style:none; margin:0; padding:0}
+  .prov-item{margin:10px 0; padding:8px 10px; border:1px solid var(--border); border-radius:10px}
+  .prov-row{display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:700}
+  .prov-pct{font-variant-numeric: tabular-nums; min-width:34px; text-align:right}
+  .prog{height:8px; background:var(--soft); border-radius:999px; overflow:hidden; margin-top:6px}
+  .prog > span{display:block; height:100%; background:var(--accent); border-radius:999px; width:0%}
+
 </style>
 </head>
 <body>
@@ -180,6 +194,13 @@
           </div>
         </div>
         <div id="findings-list"></div>
+      </section>
+      <section class="provisional" id="provisional">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px">
+          <h2>Provisional diagnosis (no radiographs)</h2>
+        </div>
+        <div id="prov-infracture" class="prov-infracture"></div>
+        <ul id="prov-list" class="prov-list"></ul>
       </section>
     </aside>
 
@@ -355,6 +376,7 @@ function selectTooth(tid){
   renderChart();
   renderChecklist();
   renderFindings();
+  renderProvisional();
 }
 
 /* ============================================================
@@ -439,17 +461,21 @@ function renderNodeButton(path, label, active, hasKids){
   const caret = hasKids ? `<span class="caret ${active?'down':''}" aria-hidden="true"></span>` : '';
   const xicon = `<span class="xicon" aria-hidden="true">&times;</span>`;
 
+  const isDiscTypeChild = (P.discType && path.length === P.discType.length + 1 && isChildOf(path, P.discType));
+
   const dataChoice =
-    (isChildOf(path,P.discType) && path.length===P.discType.length+1)               ? 'single' :
+    // ---- Discontinuity → Type direct children are MULTI now ----
+    (isDiscTypeChild) ? 'multi' :
+    // keep single-choice for each Type’s location options and all your other radios
     (isChildOf(path,P.discTypeCrownOnly) && path.length===P.discTypeCrownOnly.length+1) ? 'single' :
     (isChildOf(path,P.discTypeCrownRoot) && path.length===P.discTypeCrownRoot.length+1) ? 'single' :
-    (isChildOf(path,P.discTypeRootOnly) && path.length===P.discTypeRootOnly.length+1)   ? 'single' :
-    (isChildOf(path,P.displLL) && path.length===P.displLL.length+1)                 ? 'single' :
-    (isChildOf(path,P.displOA) && path.length===P.displOA.length+1)                 ? 'single' :
-    (isChildOf(path,P.mobIncreased) && path.length===P.mobIncreased.length+1)       ? 'single' :
-    (isChildOf(path,P.percSound) && path.length===P.percSound.length+1)             ? 'single' :
-    (isChildOf(path,P.coldEPT) && path.length===P.coldEPT.length+1)                 ? 'single' :
-    (isChildOf(path,P.airSweet) && path.length===P.airSweet.length+1)               ? 'single' : 'multi';
+    (isChildOf(path,P.discTypeRootOnly)  && path.length===P.discTypeRootOnly.length+1)  ? 'single' :
+    (isChildOf(path,P.displLL)           && path.length===P.displLL.length+1)           ? 'single' :
+    (isChildOf(path,P.displOA)           && path.length===P.displOA.length+1)           ? 'single' :
+    (isChildOf(path,P.mobIncreased)      && path.length===P.mobIncreased.length+1)      ? 'single' :
+    (isChildOf(path,P.percSound)         && path.length===P.percSound.length+1)         ? 'single' :
+    (isChildOf(path,P.coldEPT)           && path.length===P.coldEPT.length+1)           ? 'single' :
+    (isChildOf(path,P.airSweet)          && path.length===P.airSweet.length+1)          ? 'single' : 'multi';
 
   const exposureClass =
     (isChildOf(path,P.exposure) && path.length===P.exposure.length+1)
@@ -487,6 +513,21 @@ function clearNodeAndDescendants(stateNode){
   for (let i=1;i<stateNode.length;i++) clearNodeAndDescendants(stateNode[i]);
 }
 
+// ------------ Family sets (mutually evaluated) ------------
+const FAMILIES = {
+  fractures: [
+    { key: 'Crown fractures',      ids: ['CF_Enamel','CF_ED','CF_Comp'] },
+    { key: 'Crown-root fractures', ids: ['CRF_Uncomp','CRF_Comp'] },
+    { key: 'Root fractures',       ids: ['HRF'] }
+  ],
+  alveolar: [
+    { key: 'Alveolar',             ids: ['ALV_Fx'] }
+  ],
+  luxation: [
+    { key: 'Luxation',             ids: ['Concussion','Sublux','Lux_Extrusive','Lux_Lateral','Lux_Intrusive'] }
+  ]
+};
+
 function update(){
   ensureToothState(currentTooth);
   const stateTree = toothStates[currentTooth];
@@ -513,6 +554,7 @@ function update(){
   addOcclusalNoteIfNeeded();
   renderFindings();
   renderChart();
+  renderProvisional();
 }
 
 function renderChildren(path){
@@ -640,10 +682,9 @@ function mobilityTransition(path, stateTree){
 function applyConstraints(path, stateTree, wasActive){
   const nowActive = getState(path, stateTree)[0]===1;
 
-  // Discontinuity.Type family exclusivities
-  if (isChildOf(path, P.discType) && path.length === P.discType.length + 1 && nowActive){
-    exclusiveAtParent(path, stateTree);
-  }
+  // ---- Discontinuity.Type ----
+  // ALLOW MULTIPLE Type selections (no exclusivity at Type level)
+  // Keep SINGLE selection within each Type's location set:
   if (isChildOf(path, P.discTypeCrownOnly) && path.length === P.discTypeCrownOnly.length + 1 && nowActive){
     exclusiveAtParent(path, stateTree);
   }
@@ -654,12 +695,12 @@ function applyConstraints(path, stateTree, wasActive){
     exclusiveAtParent(path, stateTree);
   }
 
-  // Exposure exact transitions
+  // ---- Exposure progressive behavior ----
   if (isChildOf(path, P.exposure) && path.length === P.exposure.length + 1){
     exposureTransition(path, stateTree, wasActive);
   }
 
-  // Displacement per-axis (radio)
+  // ---- Displacement per-axis (radio) ----
   if (isChildOf(path, P.displLL) && path.length === P.displLL.length + 1 && nowActive){
     exclusiveAtParent(path, stateTree);
   }
@@ -667,7 +708,7 @@ function applyConstraints(path, stateTree, wasActive){
     exclusiveAtParent(path, stateTree);
   }
 
-  // Mobility grades exclusivity + triad interactions
+  // ---- Mobility grades exclusivity + triad interactions ----
   if (isChildOf(path, P.mobIncreased) && path.length === P.mobIncreased.length + 1 && nowActive){
     exclusiveAtParent(path, stateTree);
   }
@@ -675,15 +716,15 @@ function applyConstraints(path, stateTree, wasActive){
     mobilityTransition(path, stateTree);
   }
 
-  // Percussion.Sound (single)
+  // ---- Percussion.Sound (single) ----
   if (isChildOf(path, P.percSound) && path.length === P.percSound.length + 1 && nowActive){
     exclusiveAtParent(path, stateTree);
   }
-  // Cold/EPT (single)
+  // ---- Cold/EPT (single) ----
   if (isChildOf(path, P.coldEPT) && path.length === P.coldEPT.length + 1 && nowActive){
     exclusiveAtParent(path, stateTree);
   }
-  // Air/Sweets (single)
+  // ---- Air/Sweets (single) ----
   if (isChildOf(path, P.airSweet) && path.length === P.airSweet.length + 1 && nowActive){
     exclusiveAtParent(path, stateTree);
   }
@@ -917,24 +958,25 @@ function buildFindingsBullets(tid){
   // Craze line
   if (on(P.craze)) bullets.push("Craze line");
 
-  // Discontinuity
+  // ---- Discontinuity (MULTI Type) ----
   if (on(P.discType)){
-    const tRaw = pick(P.discType);
-    if (tRaw){
-      let tWord = tRaw;
-      if (tRaw==="Crown-only") tWord = "crown";
-      if (tRaw==="Root-only")  tWord = "root";
+    const parts = [];
 
-      let loc = "";
-      if (tRaw==="Crown-only") loc = pick(P.discTypeCrownOnly);
-      if (tRaw==="Crown-root") loc = pick(P.discTypeCrownRoot);
-      if (tRaw==="Root-only")  loc = pick(P.discTypeRootOnly);
+    if (P.discTypeCrownOnly && getState(P.discTypeCrownOnly, s)[0]===1){
+      const loc = pick(P.discTypeCrownOnly);
+      parts.push(`crown${loc ? ` (${mapThird(loc)})` : ''}`);
+    }
+    if (P.discTypeCrownRoot && getState(P.discTypeCrownRoot, s)[0]===1){
+      const loc = pick(P.discTypeCrownRoot);
+      parts.push(`crown-root${loc ? ` (${(loc||'').toLowerCase()})` : ''}`);
+    }
+    if (P.discTypeRootOnly && getState(P.discTypeRootOnly, s)[0]===1){
+      const loc = pick(P.discTypeRootOnly);
+      parts.push(`root${loc ? ` (${mapThird(loc)})` : ''}`);
+    }
 
-      let line = `Discontinuity: ${tWord.toLowerCase()}`;
-      if (loc){
-        if (tRaw==="Crown-only" || tRaw==="Root-only") line += ` (${mapThird(loc)})`;
-        else line += ` (${(loc||"").toLowerCase()})`;
-      }
+    if (parts.length){
+      let line = `Discontinuity: ${parts.join(' & ')}`;
       if (on(P.exposure)){
         const e = getState(P.exposure, s);
         const exp = [];
@@ -1101,7 +1143,7 @@ function resetTooth(){
   toothStates[currentTooth] = defaultState.map(deepCopyState);
   toothNotes[currentTooth] = { occlusion: "" };
   collapsedSections[currentTooth] = {};
-  renderChecklist(); renderFindings();
+  renderChecklist(); renderFindings(); renderProvisional();
 }
 function resetAll(){
   for (const r of [1,2,3,4]){
@@ -1112,7 +1154,17 @@ function resetAll(){
     }
   }
   selectTooth(currentTooth);
+  renderProvisional();
 }
+
+// ======================= Config =======================
+const WEIGHTS = {
+  BASE_HIT: 70,
+  SUPPORT_STRONG: 12,
+  SUPPORT_MOD: 8,
+  CONTRA: 15,
+  MAX_NO_BASE_CAP: 40 // cap if only supports (no base) are present
+};
 
 /* ============================================================
    BOOT
@@ -1122,7 +1174,557 @@ function resetAll(){
   renderChart();
   renderChecklist();
   renderFindings();
+  renderProvisional();
 })();
+
+
+
+
+// ================== Feature shape (per tooth) ==================
+// Booleans unless noted. Cold/EPT values: "increased"|"normal"|"decreased"|"noResponse"|null
+// Air/Sweets: "present"|"absent"|null
+// Percussion force flags mean selected (true) for touch/lightTap/percussion.
+/// {
+///   crazeLine,
+///   disc_crown, disc_crownroot, disc_root,
+///   crown_loc_incisal, crown_loc_middle, crown_loc_cervical,
+///   cr_loc_supra, cr_loc_sub,
+///   root_loc_cervical, root_loc_middle, root_loc_apical,
+///   exp_E, exp_D, exp_P,
+///   ll_labial, ll_palatalLingual,
+///   oa_intruded, oa_extruded,
+///   occlusalDisturbance,
+///   palp_ttp,
+///   mob_immobile, mob_physio, mob_inc,
+///   mob_grade: "G1"|"G2"|"G3"|null,
+///   alv_labial, alv_palatalLingual,
+///   perc_ttp, perc_force_touch, perc_force_lightTap, perc_force_percussion,
+///   perc_sound_metallic,
+///   sulcus_bleed,
+///   sens_cold: "increased"|"normal"|"decreased"|"noResponse"|null,
+///   sens_air: "present"|"absent"|null,
+///   // optional future:
+///   segmental_mobility
+/// }
+
+// ================= Helpers (HOISTED) =================
+function any(){ return Array.from(arguments).some(Boolean); }
+function all(){ return Array.from(arguments).every(Boolean); }
+function scoreCapNoBase(raw, baseHit){ return baseHit ? raw : Math.min(raw, WEIGHTS.MAX_NO_BASE_CAP); }
+function clamp0100(x){ return Math.max(0, Math.min(100, x)); }
+function isColdNeg(v){ return v === "noResponse"; }
+
+// convenient shorthands for “one of these locations picked”
+function hasAnyCrownLoc(f){ return any(f.crown_loc_incisal, f.crown_loc_middle, f.crown_loc_cervical); }
+function hasAnyCRLoc(f){ return any(f.cr_loc_supra, f.cr_loc_sub); }
+function hasAnyRootLoc(f){ return any(f.root_loc_cervical, f.root_loc_middle, f.root_loc_apical); }
+function ttpToTouchAndPercussion(f){ return !!(f.perc_ttp && f.perc_force_touch && f.perc_force_percussion); }
+function ttpAllForces(f){ return !!(f.perc_ttp && f.perc_force_touch && f.perc_force_lightTap && f.perc_force_percussion); }
+
+
+// ================= Scoring =================
+function scoreTooth(features){
+  const f = features;
+
+  // D1 Enamel Infracture (deterministic flag only)
+  const enamelInfracture = !!f.crazeLine; // Rule #1
+
+  // container
+  const dxs = [];
+
+  // ---- D2 Uncomplicated Crown Fracture — Enamel (Rule #2)
+  (function(){
+    const base = (f.disc_crown && f.exp_E && !f.exp_D && !f.exp_P);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    // supports (none mandated)
+    // contras: deeper involvement flags (root-only / crown-root base)
+    if (f.disc_root || f.disc_crownroot) s -= WEIGHTS.CONTRA;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"CF_Enamel", label:"Uncomplicated Crown Fracture (Enamel)", raw: clamp0100(s) });
+  })();
+
+  // ---- D3 Uncomplicated Crown Fracture — Enamel-Dentin (Rule #3)
+  (function(){
+    const base = (f.disc_crown && f.exp_E && f.exp_D && !f.exp_P);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.exp_P) s -= WEIGHTS.CONTRA; // contradicts
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"CF_ED", label:"Uncomplicated Crown Fracture (Enamel–Dentin)", raw: clamp0100(s) });
+  })();
+
+  // ---- D4 Complicated Crown Fracture (Rule #4)
+  (function(){
+    const base = (f.disc_crown && f.exp_E && f.exp_D && f.exp_P);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.sens_air === "present") s += WEIGHTS.SUPPORT_STRONG;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"CF_Comp", label:"Complicated Crown Fracture", raw: clamp0100(s) });
+  })();
+
+  // ---- D5 Uncomplicated Crown-Root Fracture (Rule #5)
+  (function(){
+    const base = (f.disc_crownroot && f.exp_E && f.exp_D && !f.exp_P);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.mob_inc) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.perc_ttp) s += WEIGHTS.SUPPORT_STRONG;
+    if (hasAnyCRLoc(f)) s += WEIGHTS.SUPPORT_MOD; // supra/sub noted
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"CRF_Uncomp", label:"Uncomplicated Crown-Root Fracture", raw: clamp0100(s) });
+  })();
+
+  // ---- D6 Complicated Crown-Root Fracture (Rule #6)
+  (function(){
+    const base = (f.disc_crownroot && f.exp_E && f.exp_D && f.exp_P);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.mob_inc) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.perc_ttp) s += WEIGHTS.SUPPORT_STRONG;
+    if (hasAnyCRLoc(f)) s += WEIGHTS.SUPPORT_MOD;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"CRF_Comp", label:"Complicated Crown-Root Fracture", raw: clamp0100(s) });
+  })();
+
+  // ---- D7 Horizontal Root Fracture (Rule #7)
+  (function(){
+    const base = !!f.disc_root;
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.mob_inc) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.perc_ttp) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.sulcus_bleed) s += WEIGHTS.SUPPORT_STRONG;
+    if (isColdNeg(f.sens_cold)) s += WEIGHTS.SUPPORT_STRONG;
+    if (hasAnyRootLoc(f)) s += WEIGHTS.SUPPORT_MOD;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"HRF", label:"Horizontal Root Fracture", raw: clamp0100(s) });
+  })();
+
+  // ---- D8 Alveolar Fracture (Rule #8)
+  (function(){
+    const base = (f.alv_labial && f.alv_palatalLingual);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    // partial evidence: one side only -> treat as support (do nothing here if base false)
+    if (!base && (f.alv_labial || f.alv_palatalLingual)) s += WEIGHTS.SUPPORT_MOD;
+    if (f.segmental_mobility) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.occlusalDisturbance) s += WEIGHTS.SUPPORT_STRONG;
+    if (isColdNeg(f.sens_cold)) s += WEIGHTS.SUPPORT_STRONG;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"ALV_Fx", label:"Alveolar Fracture", raw: clamp0100(s) });
+  })();
+
+  // ---- D9 Concussion (Rule #9)
+  (function(){
+    const base = (ttpToTouchAndPercussion(f) && f.mob_physio);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    // Contra
+    if (f.mob_inc) s -= WEIGHTS.CONTRA;
+    if (f.alv_labial || f.alv_palatalLingual) s -= WEIGHTS.CONTRA;
+    if (f.ll_labial || f.ll_palatalLingual || f.oa_intruded || f.oa_extruded) s -= WEIGHTS.CONTRA;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"Concussion", label:"Concussion", raw: clamp0100(s) });
+  })();
+
+  // ---- D10 Subluxation (Rule #10)
+  (function(){
+    const base = (f.perc_ttp && f.mob_inc); // prefer all forces, but any TTP+ qualifies
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (ttpAllForces(f)) s += WEIGHTS.SUPPORT_MOD; // small bump if all 3 forces selected
+    if (f.sulcus_bleed) s += WEIGHTS.SUPPORT_STRONG;
+    if (isColdNeg(f.sens_cold)) s += WEIGHTS.SUPPORT_STRONG;
+    // Contra: frank displacement
+    if (f.ll_labial || f.ll_palatalLingual || f.oa_intruded || f.oa_extruded) s -= WEIGHTS.CONTRA;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"Sublux", label:"Subluxation", raw: clamp0100(s) });
+  })();
+
+  // ---- D11 Extrusive Luxation (Rule #11)
+  (function(){
+    const base = !!f.oa_extruded;
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.mob_inc) s += WEIGHTS.SUPPORT_STRONG;
+    if (isColdNeg(f.sens_cold)) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.oa_intruded) s -= WEIGHTS.CONTRA; // mutual
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"Lux_Extrusive", label:"Extrusive Luxation", raw: clamp0100(s) });
+  })();
+
+  // ---- D12 Lateral Luxation (Rule #12)
+  (function(){
+    const base = (f.ll_labial || f.ll_palatalLingual);
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.alv_labial || f.alv_palatalLingual) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.mob_immobile) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.perc_sound_metallic) s += WEIGHTS.SUPPORT_STRONG; // TTP± ok
+    if (isColdNeg(f.sens_cold)) s += WEIGHTS.SUPPORT_STRONG;
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"Lux_Lateral", label:"Lateral Luxation", raw: clamp0100(s) });
+  })();
+
+  // ---- D13 Intrusive Luxation (Rule #13)
+  (function(){
+    const base = !!f.oa_intruded;
+    let s = base ? WEIGHTS.BASE_HIT : 0;
+    if (f.mob_immobile) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.perc_sound_metallic) s += WEIGHTS.SUPPORT_STRONG; // TTP± ok
+    if (isColdNeg(f.sens_cold)) s += WEIGHTS.SUPPORT_STRONG;
+    if (f.oa_extruded) s -= WEIGHTS.CONTRA; // mutual
+    s = scoreCapNoBase(s, base);
+    dxs.push({ id:"Lux_Intrusive", label:"Intrusive Luxation", raw: clamp0100(s) });
+  })();
+
+  // ---------- Normalize ----------
+  const pool = dxs.filter(d=> d.raw > 0);
+  const denom = pool.reduce((a,b)=> a + b.raw, 0);
+  const withPct = pool.map(d => ({
+    ...d,
+    pct: denom ? Math.round(100 * d.raw / denom) : 0
+  })).sort((a,b)=> b.pct - a.pct || b.raw - a.raw);
+
+  // Optional: hide <5% noise unless it’s the only one
+  const filtered = withPct.length > 1 ? withPct.filter(d=> d.pct >= 5) : withPct;
+
+  return {
+    enamelInfracture,            // Rule #1 deterministic (Yes if craze line +)
+    diagnoses: filtered          // array of {id, label, raw, pct}, sorted
+  };
+}
+
+// ------------ Base rule map per diagnosis (non-support logic only) ------------
+function computeBaseMap(f){
+  const base = Object.create(null);
+
+  // Crown fractures (mutually exclusive by exposure)
+  base.CF_Enamel     = !!(f.disc_crown && f.exp_E && !f.exp_D && !f.exp_P);
+  base.CF_ED         = !!(f.disc_crown && f.exp_E &&  f.exp_D && !f.exp_P);
+  base.CF_Comp       = !!(f.disc_crown && f.exp_E &&  f.exp_D &&  f.exp_P);
+
+  // Crown-root fractures
+  base.CRF_Uncomp    = !!(f.disc_crownroot && f.exp_E && f.exp_D && !f.exp_P);
+  base.CRF_Comp      = !!(f.disc_crownroot && f.exp_E && f.exp_D &&  f.exp_P);
+
+  // Root fractures
+  base.HRF           = !!(f.disc_root);
+
+  // Alveolar fracture
+  base.ALV_Fx        = !!(f.alv_labial && f.alv_palatalLingual);
+
+  // Luxation subfamily
+  base.Concussion    = !!(f.perc_ttp && f.perc_force_touch && f.perc_force_percussion && f.mob_physio);
+  base.Sublux        = !!(f.perc_ttp && f.perc_force_touch && f.perc_force_lightTap && f.perc_force_percussion && f.mob_inc);
+  base.Lux_Extrusive = !!(f.oa_extruded);
+  base.Lux_Lateral   = !!(f.ll_labial || f.ll_palatalLingual);
+  base.Lux_Intrusive = !!(f.oa_intruded);
+
+  return base;
+}
+// ------------ Resolve per family into final / ambiguous(%) / probable(%) ------------
+function resolveSubfamily(rawById, baseMap, ids){
+  const bases = ids.filter(id => !!baseMap[id]);
+
+  if (bases.length === 1){
+    const id = bases[0];
+    return { mode: 'final', items: [{ id, raw: rawById[id] || 0, pct: 100 }] };
+  }
+
+  if (bases.length > 1){
+    // multiple defining hits in SAME subfamily → show % using support-weighted raw
+    const denom = bases.reduce((a,id)=> a + (rawById[id]||0), 0);
+    const items = bases.map(id => {
+      const raw = rawById[id] || 0;
+      const pct = denom ? Math.round(100 * raw / denom) : 0;
+      return { id, raw, pct };
+    }).sort((a,b)=> b.pct - a.pct || b.raw - a.raw);
+    return { mode: 'ambiguous', items };
+  }
+
+  // No base → support-only split across members with raw>0
+  const candidates = ids.map(id => ({ id, raw: rawById[id]||0 })).filter(o => o.raw > 0);
+  if (!candidates.length) return { mode: 'none', items: [] };
+
+  const denom = candidates.reduce((a,b)=> a + b.raw, 0);
+  const items = candidates.map(o => ({ ...o, pct: Math.round(100 * o.raw / denom) }))
+                          .sort((a,b)=> b.pct - a.pct || b.raw - a.raw);
+  return { mode: 'probable', items };
+}
+function resolveFamilyGroup(group, rawById, baseMap){
+  const finals = [];
+  const ambiguous = [];
+  const probable = [];
+
+  for (const sub of group){
+    const r = resolveSubfamily(rawById, baseMap, sub.ids);
+    if (r.mode === 'final')       finals.push({ subkey: sub.key, items: r.items });
+    else if (r.mode === 'ambiguous') ambiguous.push({ subkey: sub.key, items: r.items });
+    else if (r.mode === 'probable')  probable.push({ subkey: sub.key, items: r.items });
+  }
+  return { finals, ambiguous, probable };
+}
+function resolveFamily(rawById, baseMap, ids){
+  const baseHits = ids.filter(id => !!baseMap[id]);
+  if (baseHits.length === 1){
+    return { mode: "final", items: [{ id: baseHits[0], pct: 100, raw: rawById[baseHits[0]]||0 }] };
+  }
+  if (baseHits.length > 1){
+    // ambiguous within family → % among base-hit diagnoses only
+    const denom = baseHits.reduce((a,id)=> a + (rawById[id]||0), 0);
+    if (!denom) return { mode: "ambiguous", items: baseHits.map(id=>({id, pct: 0, raw: 0})) };
+    const items = baseHits
+      .map(id => ({ id, raw: rawById[id]||0 }))
+      .map(o => ({ ...o, pct: Math.round(100*o.raw/denom) }))
+      .sort((a,b)=> b.pct - a.pct || b.raw - a.raw);
+    return { mode: "ambiguous", items };
+  }
+  // no base in this family → probable via supports (use all members with nonzero raw)
+  const candidates = ids
+    .map(id => ({ id, raw: rawById[id]||0 }))
+    .filter(o => o.raw > 0);
+  if (!candidates.length) return { mode: "none", items: [] };
+  const denom = candidates.reduce((a,b)=> a + b.raw, 0);
+  const items = candidates
+    .map(o => ({ ...o, pct: Math.round(100*o.raw/denom) }))
+    .sort((a,b)=> b.pct - a.pct || b.raw - a.raw);
+  return { mode: "probable", items };
+}
+
+// ------------ Public entry: returns enamel infracture flag + family outcomes ------------
+function diagnoseTooth(features){
+  const baseMap = computeBaseMap(features);
+  const scored  = scoreTooth(features);            // your existing engine with supports
+  const rawById = {};
+  (scored.diagnoses || []).forEach(d => { rawById[d.id] = d.raw; });
+
+  return {
+    enamelInfracture: !!features.crazeLine,        // Rule #1 flag
+    fractures: resolveFamilyGroup(FAMILIES.fractures, rawById, baseMap),
+    alveolar:  resolveFamilyGroup(FAMILIES.alveolar,  rawById, baseMap),
+    luxation:  resolveFamilyGroup(FAMILIES.luxation,  rawById, baseMap)
+  };
+}
+window.diagnoseTooth = diagnoseTooth;
+
+
+// ================= Example =================
+const exampleFeatures = {
+  crazeLine: false,
+  disc_crown: true, disc_crownroot: false, disc_root: false,
+  crown_loc_incisal: true, crown_loc_middle: false, crown_loc_cervical: false,
+  cr_loc_supra: false, cr_loc_sub: false,
+  root_loc_cervical: false, root_loc_middle: false, root_loc_apical: false,
+  exp_E: true, exp_D: true, exp_P: false,
+  ll_labial: false, ll_palatalLingual: false,
+  oa_intruded: false, oa_extruded: false,
+  occlusalDisturbance: false,
+  palp_ttp: false,
+  mob_immobile: false, mob_physio: true, mob_inc: false,
+  mob_grade: null,
+  alv_labial: false, alv_palatalLingual: false,
+  perc_ttp: true, perc_force_touch: true, perc_force_lightTap: true, perc_force_percussion: true,
+  perc_sound_metallic: false,
+  sulcus_bleed: false,
+  sens_cold: "normal",
+  sens_air: "absent",
+  segmental_mobility: false
+};
+
+console.log(scoreTooth(exampleFeatures));
+
+// ---------- tiny helpers tied to your existing structures ----------
+function isOn(path, stateTree){ return path && getState(path, stateTree)[0] === 1; }
+function childOn(path, idx, stateTree){ 
+  if (!Array.isArray(path)) return false;        // <— guard
+  return isOn([...path, idx], stateTree); 
+}
+function pickChildLabel(path, stateTree){
+  if (!Array.isArray(path)) return null; 
+  const d = getDesc(path), s = getState(path, stateTree);
+  for (let i=1;i<d.length;i++){ if (s[i][0]===1) return labelOf(d[i]); }
+  return null;
+}
+
+function featuresFromState(tid){
+  ensureToothState(tid);
+  const st = toothStates[tid];
+
+  const features = {
+    // Inspection
+    crazeLine:            isOn(P.craze, st),
+    disc_crown:           isOn(P.discTypeCrownOnly, st),
+    disc_crownroot:       isOn(P.discTypeCrownRoot, st),
+    disc_root:            isOn(P.discTypeRootOnly, st),
+
+    crown_loc_incisal:    childOn(P.discTypeCrownOnly, 1, st),
+    crown_loc_middle:     childOn(P.discTypeCrownOnly, 2, st),
+    crown_loc_cervical:   childOn(P.discTypeCrownOnly, 3, st),
+
+    cr_loc_supra:         childOn(P.discTypeCrownRoot, 1, st),
+    cr_loc_sub:           childOn(P.discTypeCrownRoot, 2, st),
+
+    root_loc_cervical:    childOn(P.discTypeRootOnly, 1, st),
+    root_loc_middle:      childOn(P.discTypeRootOnly, 2, st),
+    root_loc_apical:      childOn(P.discTypeRootOnly, 3, st),
+
+    exp_E:                childOn(P.exposure, 1, st),
+    exp_D:                childOn(P.exposure, 2, st),
+    exp_P:                childOn(P.exposure, 3, st),
+
+    ll_labial:            childOn(P.displLL, 1, st),
+    ll_palatalLingual:    childOn(P.displLL, 2, st),
+
+    oa_intruded:          childOn(P.displOA, 1, st),
+    oa_extruded:          childOn(P.displOA, 2, st),
+
+    occlusalDisturbance:  isOn(P.occlusal, st),
+
+    // Palpation
+    palp_ttp:             isOn(P.palpTender, st),
+    mob_immobile:         isOn(P.mobImmobile, st),
+    mob_physio:           isOn(P.mobPhysio, st),
+    mob_inc:              isOn(P.mobIncreased, st),
+    mob_grade:            (()=>{
+                           if (!isOn(P.mobIncreased, st)) return null;
+                           const lab = pickChildLabel(P.mobIncreased, st);
+                           if (!lab) return null;
+                           if (/grade\s*i\b/i.test(lab)) return "G1";
+                           if (/grade\s*ii\b/i.test(lab)) return "G2";
+                           if (/grade\s*iii\b/i.test(lab)) return "G3";
+                           return null;
+                         })(),
+    alv_labial:           childOn(P.alveolus, 1, st),
+    alv_palatalLingual:   childOn(P.alveolus, 2, st),
+
+    // Percussion
+    perc_ttp:             isOn(P.percTender, st),
+    perc_force_touch:     childOn(P.percTenderForce, 1, st),
+    perc_force_lightTap:  childOn(P.percTenderForce, 2, st),
+    perc_force_percussion:childOn(P.percTenderForce, 3, st),
+    perc_sound_metallic:  (pickChildLabel(P.percSound, st)||"").toLowerCase()==="metallic",
+
+    // Misc
+    sulcus_bleed:         isOn(P.bleedSulcus, st),
+
+    // Sensibility
+    sens_cold:            (()=>{
+                           const lab = (pickChildLabel(P.coldEPT, st)||"").toLowerCase();
+                           if (!lab) return null;
+                           if (lab.includes("increased")) return "increased";
+                           if (lab.includes("normal"))    return "normal";
+                           if (lab.includes("decreased")) return "decreased";
+                           if (lab.includes("no response")) return "noResponse";
+                           return null;
+                         })(),
+    sens_air:             (()=>{
+                           const lab = (pickChildLabel(P.airSweet, st)||"").toLowerCase();
+                           if (!lab) return null;
+                           return lab.includes("present") ? "present" : "absent";
+                         })(),
+
+    // future
+    segmental_mobility:   false
+  };
+
+  return features;
+}
+function renderProvisional(){
+  const mountList = document.getElementById('prov-list');
+  const mountInf  = document.getElementById('prov-infracture');
+  if (!mountList || !mountInf) return;
+
+  // 1) features from current tooth state
+  const f   = featuresFromState(currentTooth);
+  const res = diagnoseTooth(f);
+
+  // 2) enamel infracture (deterministic)
+  mountInf.textContent = `Enamel infracture: ${res.enamelInfracture ? 'Yes' : 'No'}`;
+
+  // 3) id→label
+  const labelById = {
+    CF_Enamel: "Uncomplicated Crown Fracture (Enamel)",
+    CF_ED: "Uncomplicated Crown Fracture (Enamel–Dentin)",
+    CF_Comp: "Complicated Crown Fracture",
+    CRF_Uncomp: "Uncomplicated Crown-Root Fracture",
+    CRF_Comp: "Complicated Crown-Root Fracture",
+    HRF: "Horizontal Root Fracture",
+    ALV_Fx: "Alveolar Fracture",
+    Concussion: "Concussion",
+    Sublux: "Subluxation",
+    Lux_Extrusive: "Extrusive Luxation",
+    Lux_Lateral: "Lateral Luxation",
+    Lux_Intrusive: "Intrusive Luxation"
+  };
+
+  // 4) helper to render one top family
+  function familyHTML(title, group){
+    const blocks = [];
+
+    // definitive items (no %)
+    group.finals.forEach(sf=>{
+      sf.items.forEach(it=>{
+        blocks.push(`
+          <li class="prov-item">
+            <div class="prov-row">
+              <span><strong>${title}</strong> — ${labelById[it.id]} <span style="color:var(--muted)">(${sf.subkey})</span></span>
+              <span class="prov-pct">definitive</span>
+            </div>
+          </li>
+        `);
+      });
+    });
+
+    // ambiguous in subfamily (multiple bases) → show %
+    group.ambiguous.forEach(sf=>{
+      const items = sf.items.map(it=>`
+        <div class="prov-row">
+          <span>${labelById[it.id]}</span><span class="prov-pct">${it.pct}%</span>
+        </div>
+        <div class="prog"><span style="width:${it.pct}%"></span></div>
+      `).join('');
+      blocks.push(`
+        <li class="prov-item">
+          <div class="prov-row">
+            <span><strong>${title}</strong> — multiple base findings <span style="color:var(--muted)">(${sf.subkey})</span></span>
+            <span class="prov-pct"></span>
+          </div>
+          ${items}
+        </li>
+      `);
+    });
+
+    // support-only (no base) → show %
+    group.probable.forEach(sf=>{
+      const items = sf.items.map(it=>`
+        <div class="prov-row">
+          <span>${labelById[it.id]}</span><span class="prov-pct">${it.pct}%</span>
+        </div>
+        <div class="prog"><span style="width:${it.pct}%"></span></div>
+      `).join('');
+      blocks.push(`
+        <li class="prov-item">
+          <div class="prov-row">
+            <span><strong>${title}</strong> — support-based <span style="color:var(--muted)">(${sf.subkey})</span></span>
+            <span class="prov-pct"></span>
+          </div>
+          ${items}
+        </li>
+      `);
+    });
+
+    return blocks.join('');
+  }
+
+  // 5) stitch all families
+  const html = [
+    familyHTML('Fracture', res.fractures),
+    familyHTML('Alveolar', res.alveolar),
+    familyHTML('Luxation', res.luxation)
+  ].filter(Boolean).join('');
+
+  mountList.innerHTML = html || `
+    <li class="prov-item">
+      <div class="prov-row"><span>No rule hits yet</span><span class="prov-pct">—</span></div>
+    </li>
+  `;
+}
+
+window.scoreTooth = scoreTooth;
+
+
 </script>
 </body>
 </html>
